@@ -4,11 +4,20 @@ const { Pool } = require("pg");
 const cors = require("cors");
 
 const app = express();
-app.use(cors()); // 개발 중 Next.js와 포트 다를 경우 필요
+
+app.use(
+  cors({
+    origin: "https://www.tokti.net/", // 실제 클라이언트 도메인으로 변경
+    methods: ["GET"],
+    credentials: true,
+  })
+);
+
+// app.use(cors());
 
 const pool = new Pool({
   connectionString: process.env.DB_URL,
-  ssl: { rejectUnauthorized: false }, // 필요하면 추가
+  // ssl: { rejectUnauthorized: false }, // 필요하면 추가
 });
 
 const clients = {};
