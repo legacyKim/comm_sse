@@ -7,7 +7,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: "https://www.tokti.net/", // 실제 클라이언트 도메인으로 변경
+    origin: "https://www.tokti.net",
     methods: ["GET"],
     credentials: true,
   })
@@ -166,5 +166,5 @@ app.get("/notifications/stream/:userId", async (req, res) => {
 });
 
 app.listen(4000, () => {
-  console.log("✅ SSE 서버 실행 중: http://localhost:4000");
+  console.log("✅ SSE 서버 실행 중: www.tokti.net");
 });
