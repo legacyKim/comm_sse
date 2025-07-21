@@ -5,19 +5,18 @@ const cors = require("cors");
 
 const app = express();
 
-app.use(
-  cors({
-    origin: "https://www.tokti.net",
-    methods: ["GET"],
-    credentials: true,
-  })
-);
+// app.use(
+//   cors({
+//     origin: "https://www.tokti.net",
+//     methods: ["GET"],
+//   })
+// );
 
-// app.use(cors());
+app.use(cors());
 
 const pool = new Pool({
   connectionString: process.env.DB_URL,
-  // ssl: { rejectUnauthorized: false }, // 필요하면 추가
+  // ssl: { rejectUnauthorized: false }, // 필요하면   추가
 });
 
 const clients = {};
@@ -27,6 +26,10 @@ function setupSSE(req, res) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+
+  res.setHeader("Access-Control-Allow-Origin", "https://www.tokti.net");
+  // res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+
   res.flushHeaders(); // 헤더 바로 전송
 
   // 연결 유지를 위한 빈 데이터 주기적 전송 (30초마다)
@@ -85,26 +88,26 @@ app.get("/events/:url_slug", async (req, res) => {
 });
 
 // posts 스트림
-app.get("/posts/stream", async (req, res) => {
-  const disconnect = setupSSE(req, res);
-  const client = await pool.connect();
+// app.get("/posts/stream", async (req, res) => {
+//   const disconnect = setupSSE(req, res);
+//   const client = await pool.connect();
 
-  await client.query("LISTEN post_events");
+//   await client.query("LISTEN post_events");
 
-  const notify = (msg) => {
-    if (msg.channel === "post_events") {
-      res.write(`data: ${msg.payload}\n\n`);
-    }
-  };
+//   const notify = (msg) => {
+//     if (msg.channel === "post_events") {
+//       res.write(`data: ${msg.payload}\n\n`);
+//     }
+//   };
 
-  client.on("notification", notify);
+//   client.on("notification", notify);
 
-  req.on("close", () => {
-    client.removeListener("notification", notify);
-    client.release();
-    disconnect();
-  });
-});
+//   req.on("close", () => {
+//     client.removeListener("notification", notify);
+//     client.release();
+//     disconnect();
+//   });
+// });
 
 // comments 스트림
 app.get("/comments/stream", async (req, res) => {
