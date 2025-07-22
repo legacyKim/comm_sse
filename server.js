@@ -5,14 +5,14 @@ const cors = require("cors");
 
 const app = express();
 
-// app.use(
-//   cors({
-//     origin: "https://www.tokti.net",
-//     methods: ["GET"],
-//   })
-// );
+app.use(
+  cors({
+    origin: "https://www.tokti.net",
+    methods: ["GET"],
+  })
+);
 
-app.use(cors());
+// app.use(cors());
 
 const pool = new Pool({
   connectionString: process.env.DB_URL,
