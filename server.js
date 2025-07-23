@@ -118,23 +118,46 @@ app.get("/comments/stream", async (req, res) => {
   const notify = (msg) => {
     console.log("comment_events 알림 수신:", msg);
     if (msg.channel === "comment_events") {
-      console.log("알림 데이터:", msg.payload);
-      res.write(`data: ${msg.payload}\n\n`);
+      try {
+        console.log("알림 데이터:", msg.payload);
+        // JSON 형식인지 확인하고 파싱
+        const data =
+          typeof msg.payload === "string"
+            ? JSON.parse(msg.payload)
+            : msg.payload;
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      } catch (err) {
+        console.error("JSON 파싱 오류:", err);
+        // 파싱 실패시 빈 객체 전송
+        res.write(`data: {}\n\n`);
+      }
     }
   };
 
   client.on("notification", notify);
 
-  console.error("알림 리스너 등록됨");
+  console.log("알림 리스너 등록됨");
 
   req.on("close", () => {
-    client.removeListener("notification", notify);
-    client.release();
-    disconnect();
+    console.log("클라이언트 연결 해제");
+    try {
+      client.removeListener("notification", notify);
+      client.release();
+      disconnect();
+    } catch (err) {
+      console.error("연결 해제 중 오류:", err);
+    }
   });
 
   res.on("error", (err) => {
     console.error("Response error:", err);
+    try {
+      client.removeListener("notification", notify);
+      client.release();
+      disconnect();
+    } catch (releaseErr) {
+      console.error("오류 발생 후 정리 중 오류:", releaseErr);
+    }
   });
 });
 
