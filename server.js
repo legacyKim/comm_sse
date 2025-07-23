@@ -6,10 +6,16 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// 환경에 따른 CORS 설정
+const corsOrigin =
+  process.env.NODE_ENV === "production"
+    ? "https://www.tokti.net"
+    : ["https://www.tokti.net", "http://localhost:3000"];
+
 app.use(
   cors({
-    origin: ["https://www.tokti.net", "http://localhost:3000"],
-    methods: ["GET", "POST", "OPTIONS"],
+    origin: corsOrigin,
+    methods: ["GET", "OPTIONS"],
     credentials: false,
     allowedHeaders: ["Content-Type", "Cache-Control"],
   })
@@ -24,14 +30,6 @@ const pool = new Pool({
 });
 
 const clients = {};
-
-// OPTIONS 요청 처리 (CORS preflight)
-app.options("*", (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "https://www.tokti.net");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Cache-Control");
-  res.status(200).end();
-});
 
 // SSE 연결 공통 세팅 함수
 function setupSSE(req, res) {
