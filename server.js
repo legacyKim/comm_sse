@@ -245,21 +245,31 @@ app.get("/notifications/stream/:userId", async (req, res) => {
 // 테스트용 엔드포인트 - 수동으로 알림 전송
 app.get("/test/notify", async (req, res) => {
   try {
+    console.log("테스트 알림 전송 시작");
+
+    // 새로운 클라이언트 연결로 알림 전송
     const client = await pool.connect();
+    console.log("테스트용 DB 클라이언트 연결됨");
 
     // 테스트 알림 전송
+    const testData = {
+      id: 999,
+      event: "INSERT",
+      content: "테스트 댓글",
+      user_nickname: "테스트유저",
+      created_at: new Date().toISOString(),
+    };
+
+    console.log("전송할 테스트 데이터:", testData);
+
     await client.query("SELECT pg_notify('comment_events', $1)", [
-      JSON.stringify({
-        id: 999,
-        event: "INSERT",
-        content: "테스트 댓글",
-        user_nickname: "테스트유저",
-        created_at: new Date().toISOString(),
-      }),
+      JSON.stringify(testData),
     ]);
 
+    console.log("pg_notify 실행 완료");
     client.release();
-    res.json({ success: true, message: "테스트 알림 전송됨" });
+
+    res.json({ success: true, message: "테스트 알림 전송됨", data: testData });
   } catch (err) {
     console.error("테스트 알림 전송 오류:", err);
     res.status(500).json({ error: err.message });
