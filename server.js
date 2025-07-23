@@ -122,45 +122,61 @@ app.get("/comments/stream", async (req, res) => {
     })}\n\n`
   );
 
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+    console.log("Postgres client 연결됨");
 
-  console.log(client);
-  console.log("Postgres client 연결됨");
+    client.on("error", (err) => {
+      console.error("Postgres client error:", err);
+    });
 
-  client.on("error", (err) => {
-    console.error("Postgres client error:", err);
-  });
+    await client.query("LISTEN comment_events");
+    console.log("LISTEN comment_events 실행 완료");
 
-  await client.query("LISTEN comment_events");
+    const notify = (msg) => {
+      console.log("=== comment_events 알림 수신 ===");
+      console.log("Channel:", msg.channel);
+      console.log("Payload:", msg.payload);
+      console.log("Raw message:", msg);
 
-  const notify = (msg) => {
-    console.log("comment_events 알림 수신:", msg);
-    if (msg.channel === "comment_events") {
-      try {
-        console.log("알림 데이터:", msg.payload);
-        // JSON 형식인지 확인하고 파싱
-        const data =
-          typeof msg.payload === "string"
-            ? JSON.parse(msg.payload)
-            : msg.payload;
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-      } catch (err) {
-        console.error("JSON 파싱 오류:", err);
-        // 파싱 실패시 빈 객체 전송
-        res.write(`data: {}\n\n`);
+      if (msg.channel === "comment_events") {
+        try {
+          console.log("알림 데이터 처리 시작:", msg.payload);
+          // JSON 형식인지 확인하고 파싱
+          const data =
+            typeof msg.payload === "string"
+              ? JSON.parse(msg.payload)
+              : msg.payload;
+
+          console.log("파싱된 데이터:", data);
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+          console.log("클라이언트로 데이터 전송 완료");
+        } catch (err) {
+          console.error("JSON 파싱 오류:", err);
+          console.error("파싱 실패한 payload:", msg.payload);
+          // 파싱 실패시 빈 객체 전송
+          res.write(`data: {}\n\n`);
+        }
       }
-    }
-  };
+    };
 
-  client.on("notification", notify);
-
-  console.log("알림 리스너 등록됨");
+    client.on("notification", notify);
+    console.log("알림 리스너 등록됨");
+  } catch (err) {
+    console.error("PostgreSQL 연결 또는 LISTEN 설정 오류:", err);
+    res.write(
+      `data: ${JSON.stringify({ event: "error", message: "DB 연결 오류" })}\n\n`
+    );
+  }
 
   req.on("close", () => {
     console.log("클라이언트 연결 해제");
     try {
-      client.removeListener("notification", notify);
-      client.release();
+      if (client) {
+        client.removeListener("notification", notify);
+        client.release();
+      }
       disconnect();
     } catch (err) {
       console.error("연결 해제 중 오류:", err);
@@ -170,8 +186,10 @@ app.get("/comments/stream", async (req, res) => {
   res.on("error", (err) => {
     console.error("Response error:", err);
     try {
-      client.removeListener("notification", notify);
-      client.release();
+      if (client) {
+        client.removeListener("notification", notify);
+        client.release();
+      }
       disconnect();
     } catch (releaseErr) {
       console.error("오류 발생 후 정리 중 오류:", releaseErr);
