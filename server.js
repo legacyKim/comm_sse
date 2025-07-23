@@ -29,6 +29,7 @@ function setupSSE(req, res) {
 
   res.setHeader("Access-Control-Allow-Origin", "https://www.tokti.net");
   // res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+  // res.setHeader("Access-Control-Allow-Origin", "*");
 
   res.flushHeaders(); // 헤더 바로 전송
 
@@ -50,6 +51,10 @@ function setupSSE(req, res) {
 app.get("/events/:url_slug", async (req, res) => {
   const { url_slug } = req.params;
   const client = await pool.connect();
+
+  client.on("error", (err) => {
+    console.error("Postgres client error:", err);
+  });
 
   await client.query("LISTEN post_trigger");
 
@@ -85,34 +90,20 @@ app.get("/events/:url_slug", async (req, res) => {
 
     closeSSE();
   });
+
+  res.on("error", (err) => {
+    console.error("Response error:", err);
+  });
 });
-
-// posts 스트림
-// app.get("/posts/stream", async (req, res) => {
-//   const disconnect = setupSSE(req, res);
-//   const client = await pool.connect();
-
-//   await client.query("LISTEN post_events");
-
-//   const notify = (msg) => {
-//     if (msg.channel === "post_events") {
-//       res.write(`data: ${msg.payload}\n\n`);
-//     }
-//   };
-
-//   client.on("notification", notify);
-
-//   req.on("close", () => {
-//     client.removeListener("notification", notify);
-//     client.release();
-//     disconnect();
-//   });
-// });
 
 // comments 스트림
 app.get("/comments/stream", async (req, res) => {
   const disconnect = setupSSE(req, res);
   const client = await pool.connect();
+
+  client.on("error", (err) => {
+    console.error("Postgres client error:", err);
+  });
 
   await client.query("LISTEN comment_events");
 
@@ -129,6 +120,10 @@ app.get("/comments/stream", async (req, res) => {
     client.release();
     disconnect();
   });
+
+  res.on("error", (err) => {
+    console.error("Response error:", err);
+  });
 });
 
 // notifications 스트림 (예: 특정 유저 알림)
@@ -142,6 +137,10 @@ app.get("/notifications/stream/:userId", async (req, res) => {
 
   const disconnect = setupSSE(req, res);
   const client = await pool.connect();
+
+  client.on("error", (err) => {
+    console.error("Postgres client error:", err);
+  });
 
   await client.query("LISTEN new_notification");
 
@@ -165,6 +164,10 @@ app.get("/notifications/stream/:userId", async (req, res) => {
     client.removeListener("notification", notify);
     client.release();
     disconnect();
+  });
+
+  res.on("error", (err) => {
+    console.error("Response error:", err);
   });
 });
 
