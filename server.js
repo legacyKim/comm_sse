@@ -6,17 +6,20 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-app.use(
-  cors({
-    origin: "https://www.tokti.net",
-    methods: ["GET"],
-  })
-);
+// app.use(
+//   cors({
+//     origin: "https://www.tokti.net",
+//     methods: ["GET"],
+//   })
+// );
 
-// app.use(cors());
+app.use(cors());
 
 const pool = new Pool({
   connectionString: process.env.DB_URL,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  keepAlive: true,
   // ssl: { rejectUnauthorized: false }, // 필요하면   추가
 });
 
@@ -28,8 +31,8 @@ function setupSSE(req, res) {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
 
-  res.setHeader("Access-Control-Allow-Origin", "https://www.tokti.net");
-  // res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+  // res.setHeader("Access-Control-Allow-Origin", "https://www.tokti.net");
+  res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
   // res.setHeader("Access-Control-Allow-Origin", "*");
 
   res.flushHeaders(); // 헤더 바로 전송
