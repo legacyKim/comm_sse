@@ -4,6 +4,7 @@ const { Pool } = require("pg");
 const cors = require("cors");
 
 const app = express();
+const PORT = process.env.PORT || 4000;
 
 app.use(
   cors({
@@ -98,6 +99,7 @@ app.get("/events/:url_slug", async (req, res) => {
 
 // comments 스트림
 app.get("/comments/stream", async (req, res) => {
+  console.log("comments stream 연결됨");
   const disconnect = setupSSE(req, res);
   const client = await pool.connect();
 
@@ -171,6 +173,6 @@ app.get("/notifications/stream/:userId", async (req, res) => {
   });
 });
 
-app.listen(4000, () => {
-  console.log("✅ SSE 서버 실행 중: www.tokti.net");
+app.listen(PORT, () => {
+  console.log(`✅ SSE 서버 실행 중 on port ${PORT}`);
 });
