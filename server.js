@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const { Pool } = require("pg");
 const cors = require("cors");
+const redis = require("redis");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -15,7 +16,7 @@ const corsOrigin =
 app.use(
   cors({
     origin: corsOrigin,
-    methods: ["GET", "OPTIONS"],
+    methods: ["GET", "POST", "OPTIONS"],
     credentials: false,
     allowedHeaders: ["Content-Type", "Cache-Control"],
   })
@@ -26,8 +27,28 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
   keepAlive: true,
-  // ssl: { rejectUnauthorized: false }, // 필요하면   추가
+  ssl: { rejectUnauthorized: false }, // Neon은 SSL 필요
 });
+
+// Redis 클라이언트 설정
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL || "redis://localhost:6379",
+});
+
+const redisSubscriber = redis.createClient({
+  url: process.env.REDIS_URL || "redis://localhost:6379",
+});
+
+// Redis 연결
+(async () => {
+  try {
+    await redisClient.connect();
+    await redisSubscriber.connect();
+    console.log("✅ Redis 연결됨");
+  } catch (err) {
+    console.error("❌ Redis 연결 실패:", err);
+  }
+})();
 
 const clients = {};
 
@@ -107,93 +128,71 @@ app.get("/events/:url_slug", async (req, res) => {
   });
 });
 
-// comments 스트림
+// comments 스트림 - Redis pub/sub 방식
 app.get("/comments/stream", async (req, res) => {
-  console.log("comments stream 연결됨");
+  console.log("comments stream 연결됨 (Redis 방식)");
   const disconnect = setupSSE(req, res);
 
   // 즉시 연결 확인 메시지 전송
   res.write(
     `data: ${JSON.stringify({
       event: "connected",
-      message: "SSE 연결 성공",
+      message: "SSE 연결 성공 (Redis 모드)",
     })}\n\n`
   );
 
-  let client;
-  let notify; // notify 함수를 상위 스코프에서 선언
+  let isActive = true;
 
+  // Redis 메시지 리스너
+  const messageHandler = (message) => {
+    if (!isActive) return;
+
+    try {
+      console.log("Redis에서 댓글 알림 수신:", message);
+      const data = JSON.parse(message);
+
+      console.log("파싱된 데이터:", data);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      console.log("클라이언트로 데이터 전송 완료");
+    } catch (err) {
+      console.error("Redis 메시지 파싱 오류:", err);
+    }
+  };
+
+  // Redis 구독 시작
   try {
-    client = await pool.connect();
-    console.log("Postgres client 연결됨");
-
-    client.on("error", (err) => {
-      console.error("Postgres client error:", err);
-    });
-
-    await client.query("LISTEN comment_events");
-    console.log("LISTEN comment_events 실행 완료");
-
-    notify = (msg) => {
-      console.log("=== comment_events 알림 수신 ===");
-      console.log("Channel:", msg.channel);
-      console.log("Payload:", msg.payload);
-      console.log("Raw message:", msg);
-
-      if (msg.channel === "comment_events") {
-        try {
-          console.log("알림 데이터 처리 시작:", msg.payload);
-          // JSON 형식인지 확인하고 파싱
-          const data =
-            typeof msg.payload === "string"
-              ? JSON.parse(msg.payload)
-              : msg.payload;
-
-          console.log("파싱된 데이터:", data);
-          res.write(`data: ${JSON.stringify(data)}\n\n`);
-          console.log("클라이언트로 데이터 전송 완료");
-        } catch (err) {
-          console.error("JSON 파싱 오류:", err);
-          console.error("파싱 실패한 payload:", msg.payload);
-          // 파싱 실패시 빈 객체 전송
-          res.write(`data: {}\n\n`);
-        }
-      }
-    };
-
-    client.on("notification", notify);
-    console.log("알림 리스너 등록됨");
+    await redisSubscriber.subscribe("comment_events", messageHandler);
+    console.log("Redis comment_events 채널 구독 시작");
   } catch (err) {
-    console.error("PostgreSQL 연결 또는 LISTEN 설정 오류:", err);
+    console.error("Redis 구독 오류:", err);
     res.write(
-      `data: ${JSON.stringify({ event: "error", message: "DB 연결 오류" })}\n\n`
+      `data: ${JSON.stringify({
+        event: "error",
+        message: "Redis 구독 오류",
+      })}\n\n`
     );
   }
 
-  req.on("close", () => {
-    console.log("클라이언트 연결 해제");
+  req.on("close", async () => {
+    console.log("클라이언트 연결 해제 (Redis)");
+    isActive = false;
     try {
-      if (client && notify) {
-        client.removeListener("notification", notify);
-        client.release();
-      }
-      disconnect();
+      await redisSubscriber.unsubscribe("comment_events");
     } catch (err) {
-      console.error("연결 해제 중 오류:", err);
+      console.error("Redis 구독 해제 오류:", err);
     }
+    disconnect();
   });
 
-  res.on("error", (err) => {
-    console.error("Response error:", err);
+  res.on("error", async (err) => {
+    console.error("Response error (Redis):", err);
+    isActive = false;
     try {
-      if (client && notify) {
-        client.removeListener("notification", notify);
-        client.release();
-      }
-      disconnect();
-    } catch (releaseErr) {
-      console.error("오류 발생 후 정리 중 오류:", releaseErr);
+      await redisSubscriber.unsubscribe("comment_events");
+    } catch (unsubErr) {
+      console.error("Redis 구독 해제 오류:", unsubErr);
     }
+    disconnect();
   });
 });
 
@@ -242,16 +241,11 @@ app.get("/notifications/stream/:userId", async (req, res) => {
   });
 });
 
-// 테스트용 엔드포인트 - 수동으로 알림 전송
+// 테스트용 엔드포인트 - Redis로 알림 전송
 app.get("/test/notify", async (req, res) => {
   try {
-    console.log("테스트 알림 전송 시작");
+    console.log("Redis 테스트 알림 전송 시작");
 
-    // 새로운 클라이언트 연결로 알림 전송
-    const client = await pool.connect();
-    console.log("테스트용 DB 클라이언트 연결됨");
-
-    // 테스트 알림 전송
     const testData = {
       id: 999,
       event: "INSERT",
@@ -260,18 +254,35 @@ app.get("/test/notify", async (req, res) => {
       created_at: new Date().toISOString(),
     };
 
-    console.log("전송할 테스트 데이터:", testData);
+    console.log("Redis로 전송할 테스트 데이터:", testData);
 
-    await client.query("SELECT pg_notify('comment_events', $1)", [
-      JSON.stringify(testData),
-    ]);
+    // Redis로 알림 발행
+    await redisClient.publish("comment_events", JSON.stringify(testData));
 
-    console.log("pg_notify 실행 완료");
-    client.release();
+    console.log("Redis publish 완료");
 
-    res.json({ success: true, message: "테스트 알림 전송됨", data: testData });
+    res.json({
+      success: true,
+      message: "Redis 테스트 알림 전송됨",
+      data: testData,
+    });
   } catch (err) {
-    console.error("테스트 알림 전송 오류:", err);
+    console.error("Redis 테스트 알림 전송 오류:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 댓글 생성 시 호출할 엔드포인트 (실제 사용)
+app.post("/api/comment/notify", express.json(), async (req, res) => {
+  try {
+    const commentData = req.body;
+    console.log("실제 댓글 알림 발행:", commentData);
+
+    await redisClient.publish("comment_events", JSON.stringify(commentData));
+
+    res.json({ success: true, message: "댓글 알림 발행됨" });
+  } catch (err) {
+    console.error("댓글 알림 발행 오류:", err);
     res.status(500).json({ error: err.message });
   }
 });
