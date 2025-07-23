@@ -8,12 +8,12 @@ const PORT = process.env.PORT || 4000;
 
 app.use(
   cors({
-    origin: "https://www.tokti.net",
-    methods: ["GET"],
+    origin: ["https://www.tokti.net", "http://localhost:3000"],
+    methods: ["GET", "POST", "OPTIONS"],
+    credentials: false,
+    allowedHeaders: ["Content-Type", "Cache-Control"],
   })
 );
-
-app.use(cors());
 
 const pool = new Pool({
   connectionString: process.env.DB_URL,
@@ -25,15 +25,24 @@ const pool = new Pool({
 
 const clients = {};
 
+// OPTIONS 요청 처리 (CORS preflight)
+app.options("*", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "https://www.tokti.net");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Cache-Control");
+  res.status(200).end();
+});
+
 // SSE 연결 공통 세팅 함수
 function setupSSE(req, res) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
 
+  // CORS 헤더 추가
   res.setHeader("Access-Control-Allow-Origin", "https://www.tokti.net");
-  // res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
-  // res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET");
+  res.setHeader("Access-Control-Allow-Headers", "Cache-Control");
 
   res.flushHeaders(); // 헤더 바로 전송
 
@@ -104,6 +113,15 @@ app.get("/events/:url_slug", async (req, res) => {
 app.get("/comments/stream", async (req, res) => {
   console.log("comments stream 연결됨");
   const disconnect = setupSSE(req, res);
+
+  // 즉시 연결 확인 메시지 전송
+  res.write(
+    `data: ${JSON.stringify({
+      event: "connected",
+      message: "SSE 연결 성공",
+    })}\n\n`
+  );
+
   const client = await pool.connect();
 
   console.log(client);
