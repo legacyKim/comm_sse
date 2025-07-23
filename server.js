@@ -106,6 +106,9 @@ app.get("/comments/stream", async (req, res) => {
   const disconnect = setupSSE(req, res);
   const client = await pool.connect();
 
+  console.log(client);
+  console.log("Postgres client 연결됨");
+
   client.on("error", (err) => {
     console.error("Postgres client error:", err);
   });
@@ -113,12 +116,16 @@ app.get("/comments/stream", async (req, res) => {
   await client.query("LISTEN comment_events");
 
   const notify = (msg) => {
+    console.log("comment_events 알림 수신:", msg);
     if (msg.channel === "comment_events") {
+      console.log("알림 데이터:", msg.payload);
       res.write(`data: ${msg.payload}\n\n`);
     }
   };
 
   client.on("notification", notify);
+
+  console.error("알림 리스너 등록됨");
 
   req.on("close", () => {
     client.removeListener("notification", notify);
