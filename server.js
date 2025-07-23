@@ -121,6 +121,8 @@ app.get("/comments/stream", async (req, res) => {
   );
 
   let client;
+  let notify; // notify 함수를 상위 스코프에서 선언
+
   try {
     client = await pool.connect();
     console.log("Postgres client 연결됨");
@@ -132,7 +134,7 @@ app.get("/comments/stream", async (req, res) => {
     await client.query("LISTEN comment_events");
     console.log("LISTEN comment_events 실행 완료");
 
-    const notify = (msg) => {
+    notify = (msg) => {
       console.log("=== comment_events 알림 수신 ===");
       console.log("Channel:", msg.channel);
       console.log("Payload:", msg.payload);
@@ -171,7 +173,7 @@ app.get("/comments/stream", async (req, res) => {
   req.on("close", () => {
     console.log("클라이언트 연결 해제");
     try {
-      if (client) {
+      if (client && notify) {
         client.removeListener("notification", notify);
         client.release();
       }
@@ -184,7 +186,7 @@ app.get("/comments/stream", async (req, res) => {
   res.on("error", (err) => {
     console.error("Response error:", err);
     try {
-      if (client) {
+      if (client && notify) {
         client.removeListener("notification", notify);
         client.release();
       }
@@ -238,6 +240,30 @@ app.get("/notifications/stream/:userId", async (req, res) => {
   res.on("error", (err) => {
     console.error("Response error:", err);
   });
+});
+
+// 테스트용 엔드포인트 - 수동으로 알림 전송
+app.get("/test/notify", async (req, res) => {
+  try {
+    const client = await pool.connect();
+
+    // 테스트 알림 전송
+    await client.query("SELECT pg_notify('comment_events', $1)", [
+      JSON.stringify({
+        id: 999,
+        event: "INSERT",
+        content: "테스트 댓글",
+        user_nickname: "테스트유저",
+        created_at: new Date().toISOString(),
+      }),
+    ]);
+
+    client.release();
+    res.json({ success: true, message: "테스트 알림 전송됨" });
+  } catch (err) {
+    console.error("테스트 알림 전송 오류:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.listen(PORT, () => {
