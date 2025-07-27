@@ -44,7 +44,6 @@ const redisSubscriber = redis.createClient({
   try {
     await redisClient.connect();
     await redisSubscriber.connect();
-    console.log("✅ Redis 연결됨");
   } catch (err) {
     console.error("❌ Redis 연결 실패:", err);
   }
@@ -130,7 +129,6 @@ app.get("/events/:url_slug", async (req, res) => {
 
 // comments 스트림 - Redis pub/sub 방식
 app.get("/comments/stream", async (req, res) => {
-  console.log("comments stream 연결됨 (Redis 방식)");
   const disconnect = setupSSE(req, res);
 
   // 즉시 연결 확인 메시지 전송
@@ -148,12 +146,8 @@ app.get("/comments/stream", async (req, res) => {
     if (!isActive) return;
 
     try {
-      console.log("Redis에서 댓글 알림 수신:", message);
       const data = JSON.parse(message);
-
-      console.log("파싱된 데이터:", data);
       res.write(`data: ${JSON.stringify(data)}\n\n`);
-      console.log("클라이언트로 데이터 전송 완료");
     } catch (err) {
       console.error("Redis 메시지 파싱 오류:", err);
     }
@@ -162,7 +156,6 @@ app.get("/comments/stream", async (req, res) => {
   // Redis 구독 시작
   try {
     await redisSubscriber.subscribe("comment_events", messageHandler);
-    console.log("Redis comment_events 채널 구독 시작");
   } catch (err) {
     console.error("Redis 구독 오류:", err);
     res.write(
@@ -174,7 +167,6 @@ app.get("/comments/stream", async (req, res) => {
   }
 
   req.on("close", async () => {
-    console.log("클라이언트 연결 해제 (Redis)");
     isActive = false;
     try {
       await redisSubscriber.unsubscribe("comment_events");
@@ -244,8 +236,6 @@ app.get("/notifications/stream/:userId", async (req, res) => {
 // 테스트용 엔드포인트 - Redis로 알림 전송
 app.get("/test/notify", async (req, res) => {
   try {
-    console.log("Redis 테스트 알림 전송 시작");
-
     const testData = {
       id: 999,
       event: "INSERT",
@@ -254,12 +244,8 @@ app.get("/test/notify", async (req, res) => {
       created_at: new Date().toISOString(),
     };
 
-    console.log("Redis로 전송할 테스트 데이터:", testData);
-
     // Redis로 알림 발행
     await redisClient.publish("comment_events", JSON.stringify(testData));
-
-    console.log("Redis publish 완료");
 
     res.json({
       success: true,
@@ -276,13 +262,22 @@ app.get("/test/notify", async (req, res) => {
 app.post("/api/comment/notify", express.json(), async (req, res) => {
   try {
     const commentData = req.body;
-    console.log("실제 댓글 알림 발행:", commentData);
-
     await redisClient.publish("comment_events", JSON.stringify(commentData));
-
     res.json({ success: true, message: "댓글 알림 발행됨" });
   } catch (err) {
     console.error("댓글 알림 발행 오류:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 댓글 좋아요 변경 시 호출할 엔드포인트
+app.post("/api/comment/like-notify", express.json(), async (req, res) => {
+  try {
+    const likeData = req.body;
+    await redisClient.publish("comment_events", JSON.stringify(likeData));
+    res.json({ success: true, message: "좋아요 변경 알림 발행됨" });
+  } catch (err) {
+    console.error("좋아요 변경 알림 발행 오류:", err);
     res.status(500).json({ error: err.message });
   }
 });
