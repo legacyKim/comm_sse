@@ -10,8 +10,8 @@ const PORT = process.env.PORT || 4000;
 // 환경에 따른 CORS 설정
 const corsOrigin =
   process.env.NODE_ENV === "production"
-    ? "https://www.tokti.net"
-    : ["https://www.tokti.net", "http://localhost:3000"];
+    ? ["https://www.tokti.net", "https://tokti.net"]
+    : ["https://www.tokti.net", "https://tokti.net", "http://localhost:3000"];
 
 app.use(
   cors({
@@ -58,7 +58,7 @@ function setupSSE(req, res) {
   res.setHeader("Connection", "keep-alive");
 
   // CORS 헤더 추가
-  res.setHeader("Access-Control-Allow-Origin", "https://www.tokti.net");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET");
   res.setHeader("Access-Control-Allow-Headers", "Cache-Control");
 
