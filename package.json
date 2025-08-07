@@ -7,6 +7,8 @@
     "redis": "^4.6.0"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "local": "NODE_ENV=development node server.js"
   }
 }

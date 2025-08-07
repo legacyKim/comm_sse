@@ -7,6 +7,8 @@ const redis = require("redis");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+const localSSEClients = [];
+
 // 환경에 따른 CORS 설정
 const corsOrigin =
   process.env.NODE_ENV === "production"
@@ -31,21 +33,32 @@ const pool = new Pool({
 });
 
 // Redis 클라이언트 설정
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL || "redis://localhost:6379",
-});
+let redisClient, redisSubscriber;
+const useRedis =
+  process.env.REDIS_URL &&
+  process.env.REDIS_URL !== "redis://localhost:6379" &&
+  process.env.NODE_ENV === "production";
 
-const redisSubscriber = redis.createClient({
-  url: process.env.REDIS_URL || "redis://localhost:6379",
-});
+if (useRedis) {
+  redisClient = redis.createClient({
+    url: process.env.REDIS_URL || "redis://localhost:6379",
+  });
 
-// Redis 연결
+  redisSubscriber = redis.createClient({
+    url: process.env.REDIS_URL || "redis://localhost:6379",
+  });
+} else {
+  // Redis 비활성화
+} // Redis 연결
 (async () => {
-  try {
-    await redisClient.connect();
-    await redisSubscriber.connect();
-  } catch (err) {
-    console.error("❌ Redis 연결 실패:", err);
+  if (useRedis) {
+    try {
+      await redisClient.connect();
+      await redisSubscriber.connect();
+      // Redis 연결 성공
+    } catch (err) {
+      // Redis 연결 실패
+    }
   }
 })();
 
@@ -84,7 +97,7 @@ app.get("/events/:url_slug", async (req, res) => {
   const client = await pool.connect();
 
   client.on("error", (err) => {
-    console.error("Postgres client error:", err);
+    // Postgres client error handling
   });
 
   await client.query("LISTEN post_trigger");
@@ -123,7 +136,7 @@ app.get("/events/:url_slug", async (req, res) => {
   });
 
   res.on("error", (err) => {
-    console.error("Response error:", err);
+    // Response error handling
   });
 });
 
@@ -135,9 +148,38 @@ app.get("/comments/stream", async (req, res) => {
   res.write(
     `data: ${JSON.stringify({
       event: "connected",
-      message: "SSE 연결 성공 (Redis 모드)",
+      message: useRedis
+        ? "SSE 연결 성공 (Redis 모드)"
+        : "SSE 연결 성공 (로컬 모드)",
     })}\n\n`
   );
+
+  if (!useRedis) {
+    // 로컬 모드 - Redis 없이 SSE 연결 시작
+
+    localSSEClients.push(res);
+    // 현재 연결된 로컬 클라이언트 수 추가됨
+
+    req.on("close", () => {
+      const idx = localSSEClients.indexOf(res);
+      if (idx !== -1) {
+        localSSEClients.splice(idx, 1);
+        // 클라이언트 연결 해제됨
+      }
+      disconnect();
+    });
+
+    res.on("error", (err) => {
+      // 로컬 SSE 응답 오류
+      const idx = localSSEClients.indexOf(res);
+      if (idx !== -1) {
+        localSSEClients.splice(idx, 1);
+      }
+      disconnect();
+    });
+
+    return;
+  }
 
   let isActive = true;
 
@@ -149,7 +191,7 @@ app.get("/comments/stream", async (req, res) => {
       const data = JSON.parse(message);
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     } catch (err) {
-      console.error("Redis 메시지 파싱 오류:", err);
+      // Redis 메시지 파싱 오류
     }
   };
 
@@ -157,7 +199,7 @@ app.get("/comments/stream", async (req, res) => {
   try {
     await redisSubscriber.subscribe("comment_events", messageHandler);
   } catch (err) {
-    console.error("Redis 구독 오류:", err);
+    // Redis 구독 오류
     res.write(
       `data: ${JSON.stringify({
         event: "error",
@@ -171,18 +213,18 @@ app.get("/comments/stream", async (req, res) => {
     try {
       await redisSubscriber.unsubscribe("comment_events");
     } catch (err) {
-      console.error("Redis 구독 해제 오류:", err);
+      // Redis 구독 해제 오류
     }
     disconnect();
   });
 
   res.on("error", async (err) => {
-    console.error("Response error (Redis):", err);
+    // Response error (Redis)
     isActive = false;
     try {
       await redisSubscriber.unsubscribe("comment_events");
     } catch (unsubErr) {
-      console.error("Redis 구독 해제 오류:", unsubErr);
+      // Redis 구독 해제 오류
     }
     disconnect();
   });
@@ -201,7 +243,7 @@ app.get("/notifications/stream/:userId", async (req, res) => {
   const client = await pool.connect();
 
   client.on("error", (err) => {
-    console.error("Postgres client error:", err);
+    // Postgres client error handling
   });
 
   await client.query("LISTEN new_notification");
@@ -229,31 +271,109 @@ app.get("/notifications/stream/:userId", async (req, res) => {
   });
 
   res.on("error", (err) => {
-    console.error("Response error:", err);
+    // Response error handling
   });
 });
 
 // 테스트용 엔드포인트 - Redis로 알림 전송
 app.get("/test/notify", async (req, res) => {
   try {
+    const postId = 1; // 기본값
+
     const testData = {
       id: 999,
       event: "INSERT",
-      content: "테스트 댓글",
+      post_id: postId,
+      user_id: 1,
       user_nickname: "테스트유저",
+      content: "테스트 댓글",
+      parent_id: null,
+      profile: "/profile/basic.png",
+      likes: 0,
+      depth: 1,
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
 
-    // Redis로 알림 발행
-    await redisClient.publish("comment_events", JSON.stringify(testData));
+    if (useRedis) {
+      // Redis로 알림 발행
+      await redisClient.publish("comment_events", JSON.stringify(testData));
+      res.json({
+        success: true,
+        message: "Redis 테스트 알림 전송됨",
+        data: testData,
+      });
+    } else {
+      // 로컬 모드에서는 직접 연결된 클라이언트들에게 전송
+      const dataString = `data: ${JSON.stringify(testData)}\n\n`;
+      localSSEClients.forEach((clientRes) => {
+        try {
+          clientRes.write(dataString);
+        } catch (err) {
+          console.error("로컬 SSE 전송 오류:", err);
+        }
+      });
 
-    res.json({
-      success: true,
-      message: "Redis 테스트 알림 전송됨",
-      data: testData,
-    });
+      res.json({
+        success: true,
+        message: `로컬 모드 - 테스트 알림 전송됨 (${localSSEClients.length}개 클라이언트에게 전송)`,
+        data: testData,
+      });
+    }
   } catch (err) {
-    console.error("Redis 테스트 알림 전송 오류:", err);
+    console.error("테스트 알림 전송 오류:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 테스트용 엔드포인트 - postId 지정
+app.get("/test/notify/:postId", async (req, res) => {
+  try {
+    const postId = req.params.postId ? parseInt(req.params.postId) : 1;
+    // 테스트 알림 요청
+
+    const testData = {
+      id: 999,
+      event: "INSERT",
+      post_id: postId,
+      user_id: 1,
+      user_nickname: "테스트유저",
+      content: "테스트 댓글",
+      parent_id: null,
+      profile: "/profile/basic.png",
+      likes: 0,
+      depth: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    if (useRedis) {
+      // Redis로 알림 발행
+      await redisClient.publish("comment_events", JSON.stringify(testData));
+      res.json({
+        success: true,
+        message: "Redis 테스트 알림 전송됨",
+        data: testData,
+      });
+    } else {
+      // 로컬 모드에서는 직접 연결된 클라이언트들에게 전송
+      const dataString = `data: ${JSON.stringify(testData)}\n\n`;
+      localSSEClients.forEach((clientRes) => {
+        try {
+          clientRes.write(dataString);
+        } catch (err) {
+          console.error("로컬 SSE 전송 오류:", err);
+        }
+      });
+
+      res.json({
+        success: true,
+        message: `로컬 모드 - 테스트 알림 전송됨 (${localSSEClients.length}개 클라이언트에게 전송)`,
+        data: testData,
+      });
+    }
+  } catch (err) {
+    console.error("테스트 알림 전송 오류:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -262,8 +382,26 @@ app.get("/test/notify", async (req, res) => {
 app.post("/api/comment/notify", express.json(), async (req, res) => {
   try {
     const commentData = req.body;
-    await redisClient.publish("comment_events", JSON.stringify(commentData));
-    res.json({ success: true, message: "댓글 알림 발행됨" });
+    if (useRedis) {
+      await redisClient.publish("comment_events", JSON.stringify(commentData));
+      res.json({ success: true, message: "댓글 알림 발행됨" });
+    } else {
+      // 로컬 모드에서는 직접 연결된 클라이언트들에게 전송
+      const dataString = `data: ${JSON.stringify(commentData)}\n\n`;
+
+      localSSEClients.forEach((clientRes, index) => {
+        try {
+          clientRes.write(dataString);
+        } catch (err) {
+          console.error(`❌ 클라이언트 ${index + 1} 전송 오류:`, err);
+        }
+      });
+
+      res.json({
+        success: true,
+        message: `로컬 모드 - 댓글 알림 처리됨 (${localSSEClients.length}개 클라이언트에게 전송)`,
+      });
+    }
   } catch (err) {
     console.error("댓글 알림 발행 오류:", err);
     res.status(500).json({ error: err.message });
@@ -274,8 +412,25 @@ app.post("/api/comment/notify", express.json(), async (req, res) => {
 app.post("/api/comment/like-notify", express.json(), async (req, res) => {
   try {
     const likeData = req.body;
-    await redisClient.publish("comment_events", JSON.stringify(likeData));
-    res.json({ success: true, message: "좋아요 변경 알림 발행됨" });
+    if (useRedis) {
+      await redisClient.publish("comment_events", JSON.stringify(likeData));
+      res.json({ success: true, message: "좋아요 변경 알림 발행됨" });
+    } else {
+      // 로컬 모드에서는 직접 연결된 클라이언트들에게 전송
+      const dataString = `data: ${JSON.stringify(likeData)}\n\n`;
+      localSSEClients.forEach((clientRes) => {
+        try {
+          clientRes.write(dataString);
+        } catch (err) {
+          console.error("로컬 SSE 전송 오류:", err);
+        }
+      });
+
+      res.json({
+        success: true,
+        message: `로컬 모드 - 좋아요 알림 처리됨 (${localSSEClients.length}개 클라이언트에게 전송)`,
+      });
+    }
   } catch (err) {
     console.error("좋아요 변경 알림 발행 오류:", err);
     res.status(500).json({ error: err.message });
