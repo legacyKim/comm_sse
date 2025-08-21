@@ -62,8 +62,6 @@ if (useRedis) {
   }
 })();
 
-const clients = {};
-
 // SSE 연결 공통 세팅 함수
 function setupSSE(req, res) {
   res.setHeader("Content-Type", "text/event-stream");
@@ -91,54 +89,6 @@ function setupSSE(req, res) {
     res.end();
   };
 }
-
-app.get("/events/:url_slug", async (req, res) => {
-  const { url_slug } = req.params;
-  const client = await pool.connect();
-
-  client.on("error", (err) => {
-    // Postgres client error handling
-  });
-
-  await client.query("LISTEN post_trigger");
-
-  // SSE 공통 처리
-  const closeSSE = setupSSE(req, res);
-
-  // 클라이언트 관리
-  if (!clients[url_slug]) clients[url_slug] = [];
-  clients[url_slug].push(res);
-
-  const notify = (msg) => {
-    try {
-      const data = JSON.parse(msg.payload);
-      if (data.url_slug === url_slug) {
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-      }
-    } catch (err) {
-      // JSON 파싱 실패 무시
-    }
-  };
-
-  client.on("notification", notify);
-
-  req.on("close", () => {
-    client.removeListener("notification", notify);
-    clients[url_slug] = clients[url_slug].filter((r) => r !== res);
-
-    if (clients[url_slug].length === 0) {
-      client.query("UNLISTEN post_trigger");
-      client.release();
-      delete clients[url_slug];
-    }
-
-    closeSSE();
-  });
-
-  res.on("error", (err) => {
-    // Response error handling
-  });
-});
 
 // comments 스트림 - Redis pub/sub 방식
 app.get("/comments/stream", async (req, res) => {
@@ -275,113 +225,11 @@ app.get("/notifications/stream/:userId", async (req, res) => {
   });
 });
 
-// 테스트용 엔드포인트 - Redis로 알림 전송
-app.get("/test/notify", async (req, res) => {
-  try {
-    const postId = 1; // 기본값
-
-    const testData = {
-      id: 999,
-      event: "INSERT",
-      post_id: postId,
-      user_id: 1,
-      user_nickname: "테스트유저",
-      content: "테스트 댓글",
-      parent_id: null,
-      profile: "/profile/basic.png",
-      likes: 0,
-      depth: 1,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    if (useRedis) {
-      // Redis로 알림 발행
-      await redisClient.publish("comment_events", JSON.stringify(testData));
-      res.json({
-        success: true,
-        message: "Redis 테스트 알림 전송됨",
-        data: testData,
-      });
-    } else {
-      // 로컬 모드에서는 직접 연결된 클라이언트들에게 전송
-      const dataString = `data: ${JSON.stringify(testData)}\n\n`;
-      localSSEClients.forEach((clientRes) => {
-        try {
-          clientRes.write(dataString);
-        } catch (err) {
-          console.error("로컬 SSE 전송 오류:", err);
-        }
-      });
-
-      res.json({
-        success: true,
-        message: `로컬 모드 - 테스트 알림 전송됨 (${localSSEClients.length}개 클라이언트에게 전송)`,
-        data: testData,
-      });
-    }
-  } catch (err) {
-    console.error("테스트 알림 전송 오류:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 테스트용 엔드포인트 - postId 지정
-app.get("/test/notify/:postId", async (req, res) => {
-  try {
-    const postId = req.params.postId ? parseInt(req.params.postId) : 1;
-    // 테스트 알림 요청
-
-    const testData = {
-      id: 999,
-      event: "INSERT",
-      post_id: postId,
-      user_id: 1,
-      user_nickname: "테스트유저",
-      content: "테스트 댓글",
-      parent_id: null,
-      profile: "/profile/basic.png",
-      likes: 0,
-      depth: 1,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    if (useRedis) {
-      // Redis로 알림 발행
-      await redisClient.publish("comment_events", JSON.stringify(testData));
-      res.json({
-        success: true,
-        message: "Redis 테스트 알림 전송됨",
-        data: testData,
-      });
-    } else {
-      // 로컬 모드에서는 직접 연결된 클라이언트들에게 전송
-      const dataString = `data: ${JSON.stringify(testData)}\n\n`;
-      localSSEClients.forEach((clientRes) => {
-        try {
-          clientRes.write(dataString);
-        } catch (err) {
-          console.error("로컬 SSE 전송 오류:", err);
-        }
-      });
-
-      res.json({
-        success: true,
-        message: `로컬 모드 - 테스트 알림 전송됨 (${localSSEClients.length}개 클라이언트에게 전송)`,
-        data: testData,
-      });
-    }
-  } catch (err) {
-    console.error("테스트 알림 전송 오류:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // 댓글 생성 시 호출할 엔드포인트 (실제 사용)
 app.post("/api/comment/notify", express.json(), async (req, res) => {
   try {
     const commentData = req.body;
+
     if (useRedis) {
       await redisClient.publish("comment_events", JSON.stringify(commentData));
       res.json({ success: true, message: "댓글 알림 발행됨" });
