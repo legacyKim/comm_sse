@@ -135,6 +135,8 @@ app.get("/comments/stream", async (req, res) => {
 
   // Redis 메시지 리스너
   const messageHandler = (message) => {
+    console.log("Redis 메시지 수신:", message);
+
     if (!isActive) return;
 
     try {
@@ -147,9 +149,11 @@ app.get("/comments/stream", async (req, res) => {
 
   // Redis 구독 시작
   try {
+    console.log("Redis 구독 시작");
     await redisSubscriber.subscribe("comment_events", messageHandler);
   } catch (err) {
     // Redis 구독 오류
+    console.log("Redis 구독 오류:", err);
     res.write(
       `data: ${JSON.stringify({
         event: "error",
@@ -164,6 +168,7 @@ app.get("/comments/stream", async (req, res) => {
       await redisSubscriber.unsubscribe("comment_events");
     } catch (err) {
       // Redis 구독 해제 오류
+      console.log("Redis 구독 해제 오류:", err);
     }
     disconnect();
   });
@@ -175,6 +180,7 @@ app.get("/comments/stream", async (req, res) => {
       await redisSubscriber.unsubscribe("comment_events");
     } catch (unsubErr) {
       // Redis 구독 해제 오류
+      console.log("Redis 구독 해제 오류:", unsubErr);
     }
     disconnect();
   });
